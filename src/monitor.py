@@ -11,20 +11,17 @@ import psycopg
 from src.config import ConfigurationError, DEFAULT_AS_OF_DATE
 from src.db import DatabaseUnavailableError, database_connection
 from src.events import Event, save_events
-from src.reconciliation import find_missing_exchange_listing_events
+from src.reconciliation import run_reconciliation
 
 
 LOGGER = logging.getLogger(__name__)
 
 
 def run_monitoring(as_of_date: date) -> list[Event]:
-    """Run the Phase 4 reconciliation rule and persist its events."""
+    """Run implemented reconciliation rules and persist their events."""
 
     with database_connection() as connection:
-        reconciliation_events = find_missing_exchange_listing_events(
-            connection,
-            as_of_date,
-        )
+        reconciliation_events = run_reconciliation(connection, as_of_date)
         inserted_count = save_events(connection, reconciliation_events)
 
     LOGGER.info(

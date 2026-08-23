@@ -11,9 +11,13 @@ from psycopg import Connection
 from src.db import create_connection
 from src.events import Event, save_events
 from src.reconciliation import (
+    LISTING_STATUS_MISMATCH,
     MISSING_EXCHANGE_LISTING,
     MISSING_EXCHANGE_LISTING_SQL,
+    UNKNOWN_EXCHANGE_ISIN,
+    find_listing_status_mismatch_events,
     find_missing_exchange_listing_events,
+    find_unknown_exchange_isin_events,
 )
 
 
@@ -39,7 +43,8 @@ def reconciliation_connection() -> Iterator[Connection]:
                 """
                 CREATE TEMP TABLE exchange_listings (
                     isin VARCHAR(20) NOT NULL,
-                    exchange VARCHAR(50) NOT NULL
+                    exchange VARCHAR(50) NOT NULL,
+                    listing_status VARCHAR(20) NOT NULL
                 )
                 """
             )
@@ -78,8 +83,11 @@ def test_active_product_with_exchange_row_creates_no_event(
             ("TESTLISTED001", "ACTIVE"),
         )
         cursor.execute(
-            "INSERT INTO exchange_listings (isin, exchange) VALUES (%s, %s)",
-            ("TESTLISTED001", "Vienna"),
+            """
+            INSERT INTO exchange_listings (isin, exchange, listing_status)
+            VALUES (%s, %s, %s)
+            """,
+            ("TESTLISTED001", "Vienna", "ACTIVE"),
         )
 
     events = find_missing_exchange_listing_events(
@@ -132,3 +140,101 @@ def test_active_product_without_exchange_row_creates_and_persists_event(
             "CRITICAL",
             AS_OF_DATE,
         )
+
+
+def test_matching_active_statuses_create_no_mismatch_event(
+    reconciliation_connection: Connection,
+) -> None:
+    with reconciliation_connection.cursor() as cursor:
+        cursor.execute(
+            "INSERT INTO products (isin, status) VALUES (%s, %s)",
+            ("TESTMATCH001", "ACTIVE"),
+        )
+        cursor.execute(
+            """
+            INSERT INTO exchange_listings (isin, exchange, listing_status)
+            VALUES (%s, %s, %s)
+            """,
+            ("TESTMATCH001", "Vienna", "ACTIVE"),
+        )
+
+    events = find_listing_status_mismatch_events(
+        reconciliation_connection,
+        AS_OF_DATE,
+    )
+
+    assert events == []
+
+
+def test_active_internal_and_delisted_exchange_create_mismatch_event(
+    reconciliation_connection: Connection,
+) -> None:
+    with reconciliation_connection.cursor() as cursor:
+        cursor.execute(
+            "INSERT INTO products (isin, status) VALUES (%s, %s)",
+            ("TESTMISMATCH001", "ACTIVE"),
+        )
+        cursor.execute(
+            """
+            INSERT INTO exchange_listings (isin, exchange, listing_status)
+            VALUES (%s, %s, %s)
+            """,
+            ("TESTMISMATCH001", "Vienna", "DELISTED"),
+        )
+
+    events = find_listing_status_mismatch_events(
+        reconciliation_connection,
+        AS_OF_DATE,
+    )
+
+    assert events == [
+        Event(
+            isin="TESTMISMATCH001",
+            event_type=LISTING_STATUS_MISMATCH,
+            severity="CRITICAL",
+            event_date=AS_OF_DATE,
+            description=(
+                "Product TESTMISMATCH001 has internal status ACTIVE but "
+                "exchange status DELISTED on Vienna."
+            ),
+            details={
+                "internal_status": "ACTIVE",
+                "exchange_status": "DELISTED",
+                "exchange": "Vienna",
+            },
+        )
+    ]
+
+
+def test_exchange_row_without_internal_product_creates_unknown_isin_event(
+    reconciliation_connection: Connection,
+) -> None:
+    with reconciliation_connection.cursor() as cursor:
+        cursor.execute(
+            """
+            INSERT INTO exchange_listings (isin, exchange, listing_status)
+            VALUES (%s, %s, %s)
+            """,
+            ("TESTUNKNOWN001", "Vienna", "ACTIVE"),
+        )
+
+    events = find_unknown_exchange_isin_events(
+        reconciliation_connection,
+        AS_OF_DATE,
+    )
+
+    assert events == [
+        Event(
+            isin="TESTUNKNOWN001",
+            event_type=UNKNOWN_EXCHANGE_ISIN,
+            severity="WARNING",
+            event_date=AS_OF_DATE,
+            description=(
+                "Exchange listing TESTUNKNOWN001 on Vienna has no internal product."
+            ),
+            details={
+                "exchange_status": "ACTIVE",
+                "exchange": "Vienna",
+            },
+        )
+    ]

@@ -2,7 +2,7 @@
 
 A prototype monitoring system for structured-product lifecycle and exchange-listing processes.
 
-> **Project status:** Phase 4 is complete. The first vertical monitoring feature detects active internal products without exchange listings and persists idempotent events. Other reconciliation rules, validation, lifecycle rules, and the dashboard are intentionally not implemented yet.
+> **Project status:** Phase 5 is complete. All three exchange-reconciliation rules are implemented and persist idempotent events. Product validation, lifecycle rules, and the dashboard are intentionally not implemented yet.
 
 ## Business context
 
@@ -44,11 +44,11 @@ Each layer will have one responsibility. CSV parsing, SQL/database access, busin
 ## Implemented checks
 
 - `MISSING_EXCHANGE_LISTING`: active internal product with no exchange-listing row
+- `LISTING_STATUS_MISMATCH`: internal and exchange listing statuses disagree
+- `UNKNOWN_EXCHANGE_ISIN`: exchange listing has no internal product
 
 ## Planned checks
 
-- Listing-status mismatch
-- Exchange-only ISIN
 - Missing or invalid product data
 - Expired but still active product
 - Maturity within seven calendar days
@@ -138,13 +138,13 @@ python load_demo_data.py --fresh
 
 The fresh option also clears persisted events and resets their identity sequence. Later phases will add and verify commands for monitoring, tests, and the Streamlit dashboard.
 
-Run the Phase 4 monitoring feature for the deterministic demo date:
+Run reconciliation monitoring for the deterministic demo date:
 
 ```powershell
 python -m src.monitor --as-of-date 2026-08-23
 ```
 
-Run the Phase 4 reconciliation tests:
+Run the reconciliation tests:
 
 ```powershell
 python -m pytest tests/test_reconciliation.py -v
