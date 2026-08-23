@@ -1,0 +1,8 @@
+# Runtime requirements (Python 3.12+)
+psycopg[binary]>=3.2,<4.0
+pandas>=2.2,<4.0
+streamlit>=1.40,<2.0
+python-dotenv>=1.0,<2.0
+
+# Development and test requirements
+pytest>=8.0,<10.0
