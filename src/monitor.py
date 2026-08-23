@@ -11,6 +11,7 @@ import psycopg
 from src.config import ConfigurationError, DEFAULT_AS_OF_DATE
 from src.db import DatabaseUnavailableError, database_connection
 from src.events import Event, save_events
+from src.lifecycle import run_lifecycle
 from src.reconciliation import run_reconciliation
 from src.validation import validate_products
 
@@ -19,7 +20,7 @@ LOGGER = logging.getLogger(__name__)
 
 
 def run_monitoring(as_of_date: date) -> list[Event]:
-    """Run implemented validation and reconciliation rules, then persist events."""
+    """Run implemented business rules, then persist their events."""
 
     with database_connection() as connection:
         LOGGER.info("Running product validation")
@@ -27,7 +28,15 @@ def run_monitoring(as_of_date: date) -> list[Event]:
 
         LOGGER.info("Running reconciliation")
         reconciliation_events = run_reconciliation(connection, as_of_date)
-        all_events = validation_events + reconciliation_events
+
+        LOGGER.info("Running general lifecycle monitoring")
+        lifecycle_events = run_lifecycle(connection, as_of_date)
+
+        all_events = (
+            validation_events
+            + reconciliation_events
+            + lifecycle_events
+        )
         inserted_count = save_events(connection, all_events)
 
     LOGGER.info(
