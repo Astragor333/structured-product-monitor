@@ -2,7 +2,7 @@
 
 A prototype monitoring system for structured-product lifecycle and exchange-listing processes.
 
-> **Project status:** Phase 5 is complete. All three exchange-reconciliation rules are implemented and persist idempotent events. Product validation, lifecycle rules, and the dashboard are intentionally not implemented yet.
+> **Project status:** Phase 6 is complete. Product validation and all three exchange-reconciliation rules are implemented and persist idempotent events. Lifecycle rules and the dashboard are intentionally not implemented yet.
 
 ## Business context
 
@@ -46,10 +46,13 @@ Each layer will have one responsibility. CSV parsing, SQL/database access, busin
 - `MISSING_EXCHANGE_LISTING`: active internal product with no exchange-listing row
 - `LISTING_STATUS_MISMATCH`: internal and exchange listing statuses disagree
 - `UNKNOWN_EXCHANGE_ISIN`: exchange listing has no internal product
+- `MISSING_REQUIRED_FIELD`: universal or product-specific field is missing
+- `UNKNOWN_PRODUCT_TYPE`: product type is unsupported
+- `INVALID_NOMINAL`: nominal is not greater than zero
+- `INVALID_DATE_RANGE`: issue date is after maturity date
 
 ## Planned checks
 
-- Missing or invalid product data
 - Expired but still active product
 - Maturity within seven calendar days
 - Historical Bonus barrier breach
@@ -138,14 +141,14 @@ python load_demo_data.py --fresh
 
 The fresh option also clears persisted events and resets their identity sequence. Later phases will add and verify commands for monitoring, tests, and the Streamlit dashboard.
 
-Run reconciliation monitoring for the deterministic demo date:
+Run validation and reconciliation monitoring for the deterministic demo date:
 
 ```powershell
 python -m src.monitor --as-of-date 2026-08-23
 ```
 
-Run the reconciliation tests:
+Run the validation and reconciliation tests:
 
 ```powershell
-python -m pytest tests/test_reconciliation.py -v
+python -m pytest tests/test_validation.py tests/test_reconciliation.py -v
 ```

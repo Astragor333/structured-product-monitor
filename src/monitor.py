@@ -12,24 +12,30 @@ from src.config import ConfigurationError, DEFAULT_AS_OF_DATE
 from src.db import DatabaseUnavailableError, database_connection
 from src.events import Event, save_events
 from src.reconciliation import run_reconciliation
+from src.validation import validate_products
 
 
 LOGGER = logging.getLogger(__name__)
 
 
 def run_monitoring(as_of_date: date) -> list[Event]:
-    """Run implemented reconciliation rules and persist their events."""
+    """Run implemented validation and reconciliation rules, then persist events."""
 
     with database_connection() as connection:
+        LOGGER.info("Running product validation")
+        validation_events = validate_products(connection, as_of_date)
+
+        LOGGER.info("Running reconciliation")
         reconciliation_events = run_reconciliation(connection, as_of_date)
-        inserted_count = save_events(connection, reconciliation_events)
+        all_events = validation_events + reconciliation_events
+        inserted_count = save_events(connection, all_events)
 
     LOGGER.info(
         "Generated %s events and persisted %s new events",
-        len(reconciliation_events),
+        len(all_events),
         inserted_count,
     )
-    return reconciliation_events
+    return all_events
 
 
 def _parse_date(value: str) -> date:
