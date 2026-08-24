@@ -1,165 +1,273 @@
 # Structured Product Lifecycle Monitor
 
-A prototype monitoring system for structured-product lifecycle and exchange-listing processes.
+## Project Overview
 
-> **Project status:** Phase 11 is complete. A read-only Streamlit dashboard presents product, reconciliation, lifecycle, and data-quality information from PostgreSQL. Event persistence remains idempotent, and all backend rules through Express autocall monitoring remain implemented.
+Structured Product Lifecycle Monitor is a prototype of an internal banking
+operations system. It loads synthetic structured-product data into PostgreSQL,
+reconciles internal products with exchange listings, validates product
+definitions, evaluates lifecycle conditions, persists operational events, and
+presents the results in a read-only Streamlit dashboard.
 
-## Business context
+This repository is a demonstration project. It is not a production banking
+system and does not perform derivative pricing.
 
-Banks issuing large numbers of structured products need to reconcile internal product definitions with exchange listings and underlying market data. This project will model that operational workflow and surface data-quality, reconciliation, and lifecycle events without attempting derivative pricing.
+## Motivation
 
-The fixed CSV files in `data/` are read-only demo inputs. They must be ingested without modifying or silently correcting their contents.
+Banks that issue structured products need operational controls around:
+
+- exchange-listing completeness and status;
+- upcoming and overdue maturities;
+- missing or invalid product terms;
+- historical barrier observations;
+- Express Certificate autocall observation dates.
+
+The project demonstrates how these checks can be separated into testable
+business-rule modules while PostgreSQL provides durable, idempotent event
+persistence.
 
 ## Architecture
 
 ```text
-CSV input files
-       |
-       v
-Data ingestion
-       |
-       v
+CSV Demo Data
+      |
+      v
+Data Ingestion
+      |
+      v
 PostgreSQL
-       |
-       +-------------------+
-       v                   v
-Reconciliation engine   Lifecycle engine
-       |                   |
-       +---------+---------+
-                 v
-             Event store
-                 |
-                 v
-       Read-only Streamlit dashboard
+      |
+      v
+Validation / Reconciliation / Lifecycle Engines
+      |
+      v
+Events
+      |
+      v
+Streamlit Dashboard
 ```
 
-Each layer will have one responsibility. CSV parsing, SQL/database access, business rules, event persistence, and presentation will remain separate.
+Responsibilities are deliberately separated:
 
-## Planned product types
+- **Data layer:** environment configuration, PostgreSQL connections, schema,
+  CSV parsing, ingestion, and read-only dashboard queries.
+- **Business logic:** validation, reconciliation, maturity, historical barrier,
+  and exact-date autocall rules return event objects.
+- **Persistence:** the event service stores events independently of rule
+  evaluation.
+- **Presentation:** `app.py` reads products and persisted events. It does not
+  recalculate monitoring conditions or write to the database.
 
-- **Bonus Certificate:** monitored for a barrier touch at any point in the relevant historical price path.
-- **Discount Certificate:** monitored for required cap data, maturity, and listing state in the MVP.
-- **Express Certificate:** evaluated for autocall only on its exact observation date.
+Logical event identity is `isin + event_type + event_date`. PostgreSQL enforces
+this with a unique index, and inserts use `ON CONFLICT DO NOTHING`, so repeating
+the same monitoring run does not create duplicate events.
 
-## Implemented checks
+## Supported Product Types
 
-- `MISSING_EXCHANGE_LISTING`: active internal product with no exchange-listing row
-- `LISTING_STATUS_MISMATCH`: internal and exchange listing statuses disagree
-- `UNKNOWN_EXCHANGE_ISIN`: exchange listing has no internal product
-- `MISSING_REQUIRED_FIELD`: universal or product-specific field is missing
-- `UNKNOWN_PRODUCT_TYPE`: product type is unsupported
-- `INVALID_NOMINAL`: nominal is not greater than zero
-- `INVALID_DATE_RANGE`: issue date is after maturity date
-- `EXPIRED_BUT_ACTIVE`: maturity has passed while internal status remains active
-- `MATURITY_WITHIN_7_DAYS`: active product matures within seven calendar days
-- `BARRIER_BREACHED`: Bonus barrier was reached or crossed during the valid historical monitoring period
-- `AUTOCALL_TRIGGERED`: Express observation-date price reached or exceeded the autocall level
-- `MISSING_OBSERVATION_PRICE`: due Express product has no price on its exact observation date
+- **BONUS:** validates barrier and bonus-level terms and checks the complete
+  valid historical price path for the first barrier breach.
+- **DISCOUNT:** validates the required cap and participates in general
+  validation, reconciliation, and maturity monitoring.
+- **EXPRESS:** validates its observation terms and evaluates autocall only
+  against the exact observation-date market price.
 
-## Idempotent event persistence
+## Implemented Monitoring Rules
 
-Logical event identity is defined by `isin + event_type + event_date`. PostgreSQL enforces that identity with the `uq_events_identity` unique index, using `COALESCE(isin, '')` so nullable ISIN values are handled consistently. The event service inserts with `ON CONFLICT DO NOTHING`, so repeating an identical monitoring run does not create duplicate alerts while different dates or event types remain distinct.
+| Rule | Result |
+|---|---|
+| `MISSING_EXCHANGE_LISTING` | Active internal product has no exchange listing |
+| `LISTING_STATUS_MISMATCH` | Internal and exchange listing statuses differ |
+| `UNKNOWN_EXCHANGE_ISIN` | Exchange listing has no internal product |
+| `MISSING_REQUIRED_FIELD` | Universal or product-specific data is missing |
+| `UNKNOWN_PRODUCT_TYPE` | Product type is not supported |
+| `INVALID_NOMINAL` | Nominal is not greater than zero |
+| `INVALID_DATE_RANGE` | Issue date is after maturity date |
+| `EXPIRED_BUT_ACTIVE` | Product has matured but remains active |
+| `MATURITY_WITHIN_7_DAYS` | Active product matures within seven calendar days |
+| `BARRIER_BREACHED` | BONUS product reached or crossed its barrier historically |
+| `AUTOCALL_TRIGGERED` | EXPRESS observation-date price reached its autocall level |
+| `MISSING_OBSERVATION_PRICE` | Due EXPRESS product lacks its exact-date price |
 
-## Technology
+## Technology Stack
 
 - Python 3.12+
 - PostgreSQL
-- SQL and `psycopg`
+- SQL and psycopg
 - pandas
 - Streamlit
 - pytest
 - python-dotenv
 
-## Repository layout
+## Project Structure
 
 ```text
 structured-product-monitor/
-|-- data/                  # Fixed, read-only demo CSV datasets
-|-- sql/                   # PostgreSQL schema and query files (Phase 2 onward)
-|-- src/                   # Configuration, database, ingestion, and future engines
-|-- tests/                 # Automated business-rule and persistence tests
-|-- app.py                 # Read-only Streamlit dashboard entry point
-|-- load_demo_data.py      # Transactional CSV loader
-|-- requirements.txt       # Python dependencies
-|-- .env.example           # Safe database configuration template
-|-- .gitignore             # Local, generated, and secret files excluded from Git
+|-- data/                       # Fixed synthetic CSV demo data
+|-- sql/
+|   |-- 001_create_tables.sql   # PostgreSQL tables and constraints
+|   `-- 002_indexes.sql         # Query and event-identity indexes
+|-- src/
+|   |-- config.py               # Environment configuration
+|   |-- db.py                   # Transaction and read-only connections
+|   |-- ingestion.py            # Strict CSV parsing and loading
+|   |-- events.py               # Event model and persistence
+|   |-- validation.py           # Product-data validation rules
+|   |-- reconciliation.py       # Internal/exchange reconciliation
+|   |-- lifecycle.py            # Maturity, barrier, and autocall rules
+|   |-- monitor.py              # Monitoring orchestration and CLI
+|   `-- dashboard.py            # Read-only dashboard queries and filters
+|-- tests/                      # PostgreSQL-backed automated tests
+|-- app.py                      # Streamlit entry point
+|-- load_demo_data.py           # Demo-data loader CLI
+|-- requirements.txt
+|-- .env.example
 `-- README.md
 ```
 
 ## Setup
 
-### Prerequisites
+### 1. Clone the repository
 
-- Python 3.12 or newer
-- PostgreSQL installed and available for Phase 2
-- A PostgreSQL database and user with permission to create tables and indexes
+```powershell
+git clone https://github.com/Astragor333/structured-product-monitor.git
+cd structured-product-monitor
+```
 
-### Python environment
+### 2. Create and activate a Python virtual environment
 
-From the repository root, create and activate a virtual environment, then install the dependencies.
-
-PowerShell:
+Windows PowerShell:
 
 ```powershell
 py -3.12 -m venv .venv
 .\.venv\Scripts\Activate.ps1
+```
+
+macOS or Linux:
+
+```bash
+python3.12 -m venv .venv
+source .venv/bin/activate
+```
+
+### 3. Install dependencies
+
+```powershell
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
 ```
 
-### Configuration
+### 4. Create the PostgreSQL database
 
-Copy `.env.example` to `.env` and supply local PostgreSQL credentials:
+With PostgreSQL running and `psql` available:
+
+```powershell
+psql -U postgres -d postgres -c "CREATE DATABASE structured_product_monitor;"
+```
+
+Skip this command if the database already exists. If you use another database
+user or database name, use the same values in the following commands and in
+`.env`.
+
+### 5. Configure local environment variables
+
+Windows PowerShell:
 
 ```powershell
 Copy-Item .env.example .env
 ```
 
-Never commit `.env`. The demo monitoring date will be `2026-08-23`, and core business functions will receive their as-of date explicitly.
+macOS or Linux:
 
-## Running
-
-Apply the Phase 2 migrations with PostgreSQL's `psql` client after creating the configured database:
-
-```powershell
-psql -v ON_ERROR_STOP=1 -d structured_product_monitor -f sql/001_create_tables.sql
-psql -v ON_ERROR_STOP=1 -d structured_product_monitor -f sql/002_indexes.sql
+```bash
+cp .env.example .env
 ```
 
-Connection options can be supplied through PostgreSQL environment variables or explicit `psql` arguments.
+Open `.env` and replace `your_password_here` with your local PostgreSQL
+password. The real `.env` is ignored by Git and must never be committed.
 
-Load or update the fixed demo datasets:
+### 6. Apply the database schema
 
 ```powershell
-python load_demo_data.py
+psql -v ON_ERROR_STOP=1 -U postgres -d structured_product_monitor -f sql/001_create_tables.sql
+psql -v ON_ERROR_STOP=1 -U postgres -d structured_product_monitor -f sql/002_indexes.sql
 ```
 
-For a completely fresh demo database, clear all four application tables before loading:
+### 7. Load the synthetic demo data
+
+For a reproducible fresh demo, this command clears the four application tables
+before loading the fixed CSV files:
 
 ```powershell
 python load_demo_data.py --fresh
 ```
 
-The fresh option also clears persisted events and resets their identity sequence. Later phases will add and verify commands for monitoring, tests, and the Streamlit dashboard.
+To update the three source tables without clearing existing events, omit
+`--fresh`:
 
-Run validation, reconciliation, and implemented lifecycle monitoring for the deterministic demo date:
+```powershell
+python load_demo_data.py
+```
+
+### 8. Run monitoring
 
 ```powershell
 python -m src.monitor --as-of-date 2026-08-23
 ```
 
-Run all implemented business-rule tests:
-
-```powershell
-python -m pytest tests -v
-```
-
-Start the read-only dashboard:
+### 9. Start the dashboard
 
 ```powershell
 streamlit run app.py
 ```
 
-The dashboard displays the configured demo as-of date and reads products and
-already-generated events from PostgreSQL. It does not run monitoring rules or
-modify database records.
+Open `http://localhost:8501` if Streamlit does not open it automatically.
+
+## Running Tests
+
+The tests use PostgreSQL temporary tables, so the configured database must be
+running and accessible.
+
+```powershell
+python -m pytest tests -v
+```
+
+## Running Monitoring
+
+Pass the monitoring date explicitly in ISO format:
+
+```powershell
+python -m src.monitor --as-of-date 2026-08-23
+```
+
+Running the same date again is safe: logically identical events are not
+inserted twice.
+
+## Running the Dashboard
+
+```powershell
+streamlit run app.py
+```
+
+The dashboard is read-only. Its refresh button reloads products and persisted
+events but does not execute monitoring or change product data.
+
+## Demo Dataset
+
+The CSV files in `data/` are fixed, synthetic demonstration inputs. They
+intentionally contain a small number of listing, lifecycle, and product-data
+anomalies so that the monitoring rules produce meaningful events. The loader
+does not silently correct the source files.
+
+## Screenshots
+
+No dashboard screenshot is committed yet. For a portfolio presentation, start
+the dashboard and capture the **Overview** tab after running the demo workflow.
+
+## Limitations / Future Improvements
+
+Current limitations include synthetic data, no live market feed, simplified
+product terms, only three product types, no derivative pricing, and local
+deployment.
+
+Possible future extensions include automated market-data ingestion, payoff
+calculation, more product types, scheduled monitoring and alerting, and a
+historical product-detail view.

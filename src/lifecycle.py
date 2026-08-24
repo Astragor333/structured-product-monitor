@@ -248,7 +248,7 @@ def run_lifecycle(
     connection: Connection,
     as_of_date: date,
 ) -> list[Event]:
-    """Run all lifecycle rules implemented through Phase 9."""
+    """Run all implemented lifecycle rules."""
 
     return (
         find_expired_but_active_events(connection, as_of_date)

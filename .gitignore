@@ -29,6 +29,10 @@ dist/
 # Logs and local runtime artifacts
 *.log
 
+# Local database exports
+*.dump
+*.backup
+
 # Editors and operating systems
 .idea/
 .vscode/

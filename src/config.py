@@ -48,7 +48,11 @@ def get_database_config(env_file: Path = DEFAULT_ENV_FILE) -> DatabaseConfig:
 
     variable_names = ("DB_HOST", "DB_PORT", "DB_NAME", "DB_USER", "DB_PASSWORD")
     values = {name: os.getenv(name) for name in variable_names}
-    missing = [name for name, value in values.items() if value is None or not value.strip()]
+    missing = [
+        name
+        for name, value in values.items()
+        if value is None or not value.strip()
+    ]
     if missing:
         missing_list = ", ".join(missing)
         raise ConfigurationError(
@@ -59,7 +63,9 @@ def get_database_config(env_file: Path = DEFAULT_ENV_FILE) -> DatabaseConfig:
     def required_value(name: str) -> str:
         value = values[name]
         if value is None or not value.strip():
-            raise ConfigurationError(f"Missing required database configuration: {name}.")
+            raise ConfigurationError(
+                f"Missing required database configuration: {name}."
+            )
         return value
 
     try:

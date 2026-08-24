@@ -140,7 +140,7 @@ def run_reconciliation(
     connection: Connection,
     as_of_date: date,
 ) -> list[Event]:
-    """Run all reconciliation rules implemented through Phase 5."""
+    """Run all implemented reconciliation rules."""
 
     return (
         find_missing_exchange_listing_events(connection, as_of_date)
