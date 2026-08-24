@@ -1,4 +1,4 @@
-"""General structured-product lifecycle rules."""
+"""Structured-product lifecycle rules."""
 
 from __future__ import annotations
 
@@ -12,6 +12,8 @@ from src.events import Event
 EXPIRED_BUT_ACTIVE = "EXPIRED_BUT_ACTIVE"
 MATURITY_WITHIN_7_DAYS = "MATURITY_WITHIN_7_DAYS"
 BARRIER_BREACHED = "BARRIER_BREACHED"
+AUTOCALL_TRIGGERED = "AUTOCALL_TRIGGERED"
+MISSING_OBSERVATION_PRICE = "MISSING_OBSERVATION_PRICE"
 
 # Rule A: internally active products whose maturity date has already passed.
 # language=PostgreSQL
@@ -63,6 +65,29 @@ BONUS_BARRIER_BREACH_SQL = """
     ) AS first_breach ON TRUE
     WHERE p.product_type = %s
       AND p.barrier IS NOT NULL
+    ORDER BY p.isin
+"""
+
+# Rule D: due Express products and their price on exactly the configured
+# observation date. LEFT JOIN keeps products whose exact-date price is missing.
+# language=PostgreSQL
+EXPRESS_OBSERVATION_SQL = """
+    SELECT
+        p.isin,
+        p.underlying,
+        p.next_observation_date,
+        p.autocall_level,
+        mp.price AS observation_price
+    FROM products AS p
+    LEFT JOIN market_prices AS mp
+        ON mp.underlying = p.underlying
+       AND mp.price_date = p.next_observation_date
+    WHERE p.product_type = %s
+      AND p.next_observation_date <= %s
+      AND p.barrier IS NOT NULL
+      AND p.autocall_level IS NOT NULL
+      AND p.coupon IS NOT NULL
+      AND p.next_observation_date IS NOT NULL
     ORDER BY p.isin
 """
 
@@ -161,14 +186,73 @@ def find_bonus_barrier_breach_events(
     ]
 
 
+def find_express_autocall_events(
+    connection: Connection,
+    as_of_date: date,
+) -> list[Event]:
+    """Evaluate due Express products using only their exact observation price."""
+
+    with connection.cursor() as cursor:
+        cursor.execute(EXPRESS_OBSERVATION_SQL, ("EXPRESS", as_of_date))
+        due_observations = cursor.fetchall()
+
+    events: list[Event] = []
+    for (
+        isin,
+        underlying,
+        observation_date,
+        autocall_level,
+        observation_price,
+    ) in due_observations:
+        if observation_price is None:
+            events.append(
+                Event(
+                    isin=isin,
+                    event_type=MISSING_OBSERVATION_PRICE,
+                    severity="WARNING",
+                    event_date=observation_date,
+                    description=(
+                        f"Express product {isin} has no market price on "
+                        f"observation date {observation_date.isoformat()}."
+                    ),
+                    details={
+                        "underlying": underlying,
+                        "observation_date": observation_date.isoformat(),
+                        "autocall_level": float(autocall_level),
+                    },
+                )
+            )
+        elif observation_price >= autocall_level:
+            events.append(
+                Event(
+                    isin=isin,
+                    event_type=AUTOCALL_TRIGGERED,
+                    severity="CRITICAL",
+                    event_date=observation_date,
+                    description=(
+                        f"Express product {isin} met its autocall level on "
+                        f"{observation_date.isoformat()}."
+                    ),
+                    details={
+                        "underlying": underlying,
+                        "observation_price": float(observation_price),
+                        "autocall_level": float(autocall_level),
+                    },
+                )
+            )
+
+    return events
+
+
 def run_lifecycle(
     connection: Connection,
     as_of_date: date,
 ) -> list[Event]:
-    """Run all lifecycle rules implemented through Phase 8."""
+    """Run all lifecycle rules implemented through Phase 9."""
 
     return (
         find_expired_but_active_events(connection, as_of_date)
         + find_maturity_within_7_days_events(connection, as_of_date)
         + find_bonus_barrier_breach_events(connection, as_of_date)
+        + find_express_autocall_events(connection, as_of_date)
     )

@@ -1,4 +1,4 @@
-"""PostgreSQL-backed tests for general lifecycle rules."""
+"""PostgreSQL-backed tests for lifecycle rules."""
 
 from __future__ import annotations
 
@@ -12,11 +12,14 @@ from psycopg import Connection
 from src.db import create_connection
 from src.events import Event
 from src.lifecycle import (
+    AUTOCALL_TRIGGERED,
     BARRIER_BREACHED,
     EXPIRED_BUT_ACTIVE,
     MATURITY_WITHIN_7_DAYS,
+    MISSING_OBSERVATION_PRICE,
     find_bonus_barrier_breach_events,
     find_expired_but_active_events,
+    find_express_autocall_events,
     find_maturity_within_7_days_events,
     run_lifecycle,
 )
@@ -41,6 +44,9 @@ def lifecycle_connection() -> Iterator[Connection]:
                     issue_date DATE NOT NULL DEFAULT DATE '2026-01-01',
                     maturity_date DATE NOT NULL,
                     barrier NUMERIC(18, 6),
+                    autocall_level NUMERIC(18, 6),
+                    coupon NUMERIC(12, 8),
+                    next_observation_date DATE,
                     status VARCHAR(20) NOT NULL
                 )
                 """
@@ -128,6 +134,46 @@ def insert_prices(
                 (underlying, price_date, price)
                 for price_date, price in observations
             ],
+        )
+
+
+def insert_express_product(
+    connection: Connection,
+    isin: str,
+    *,
+    next_observation_date: date,
+    autocall_level: Decimal | None,
+    barrier: Decimal | None = Decimal("70"),
+    coupon: Decimal | None = Decimal("0.08"),
+    underlying: str = "TEST.EXPRESS",
+) -> None:
+    with connection.cursor() as cursor:
+        cursor.execute(
+            """
+            INSERT INTO products (
+                isin,
+                product_type,
+                underlying,
+                maturity_date,
+                barrier,
+                autocall_level,
+                coupon,
+                next_observation_date,
+                status
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """,
+            (
+                isin,
+                "EXPRESS",
+                underlying,
+                date(2030, 1, 1),
+                barrier,
+                autocall_level,
+                coupon,
+                next_observation_date,
+                "ACTIVE",
+            ),
         )
 
 
@@ -450,6 +496,191 @@ def test_bonus_price_after_maturity_date_is_ignored(
     )
 
     assert find_bonus_barrier_breach_events(
+        lifecycle_connection,
+        AS_OF_DATE,
+    ) == []
+
+
+def test_express_observation_price_above_level_triggers_autocall(
+    lifecycle_connection: Connection,
+) -> None:
+    insert_express_product(
+        lifecycle_connection,
+        "TESTEXPRESS001",
+        next_observation_date=AS_OF_DATE,
+        autocall_level=Decimal("100"),
+    )
+    insert_prices(
+        lifecycle_connection,
+        [(AS_OF_DATE, Decimal("105"))],
+        underlying="TEST.EXPRESS",
+    )
+
+    events = find_express_autocall_events(
+        lifecycle_connection,
+        AS_OF_DATE,
+    )
+
+    assert events == [
+        Event(
+            isin="TESTEXPRESS001",
+            event_type=AUTOCALL_TRIGGERED,
+            severity="CRITICAL",
+            event_date=AS_OF_DATE,
+            description=(
+                "Express product TESTEXPRESS001 met its autocall level on "
+                "2026-08-23."
+            ),
+            details={
+                "underlying": "TEST.EXPRESS",
+                "observation_price": 105.0,
+                "autocall_level": 100.0,
+            },
+        )
+    ]
+
+
+def test_express_observation_price_equal_to_level_triggers_autocall(
+    lifecycle_connection: Connection,
+) -> None:
+    insert_express_product(
+        lifecycle_connection,
+        "TESTEXPRESS002",
+        next_observation_date=AS_OF_DATE,
+        autocall_level=Decimal("100"),
+    )
+    insert_prices(
+        lifecycle_connection,
+        [(AS_OF_DATE, Decimal("100"))],
+        underlying="TEST.EXPRESS",
+    )
+
+    events = find_express_autocall_events(
+        lifecycle_connection,
+        AS_OF_DATE,
+    )
+
+    assert len(events) == 1
+    assert events[0].event_type == AUTOCALL_TRIGGERED
+
+
+def test_express_observation_price_below_level_does_not_trigger(
+    lifecycle_connection: Connection,
+) -> None:
+    insert_express_product(
+        lifecycle_connection,
+        "TESTEXPRESS003",
+        next_observation_date=AS_OF_DATE,
+        autocall_level=Decimal("100"),
+    )
+    insert_prices(
+        lifecycle_connection,
+        [(AS_OF_DATE, Decimal("99"))],
+        underlying="TEST.EXPRESS",
+    )
+
+    assert find_express_autocall_events(
+        lifecycle_connection,
+        AS_OF_DATE,
+    ) == []
+
+
+def test_express_future_observation_date_is_not_evaluated(
+    lifecycle_connection: Connection,
+) -> None:
+    future_observation_date = AS_OF_DATE + timedelta(days=1)
+    insert_express_product(
+        lifecycle_connection,
+        "TESTEXPRESS004",
+        next_observation_date=future_observation_date,
+        autocall_level=Decimal("100"),
+    )
+    insert_prices(
+        lifecycle_connection,
+        [(future_observation_date, Decimal("110"))],
+        underlying="TEST.EXPRESS",
+    )
+
+    assert find_express_autocall_events(
+        lifecycle_connection,
+        AS_OF_DATE,
+    ) == []
+
+
+def test_express_high_price_on_wrong_day_does_not_trigger(
+    lifecycle_connection: Connection,
+) -> None:
+    insert_express_product(
+        lifecycle_connection,
+        "TESTEXPRESS005",
+        next_observation_date=AS_OF_DATE,
+        autocall_level=Decimal("100"),
+    )
+    insert_prices(
+        lifecycle_connection,
+        [
+            (AS_OF_DATE - timedelta(days=1), Decimal("110")),
+            (AS_OF_DATE, Decimal("95")),
+        ],
+        underlying="TEST.EXPRESS",
+    )
+
+    assert find_express_autocall_events(
+        lifecycle_connection,
+        AS_OF_DATE,
+    ) == []
+
+
+def test_express_missing_observation_price_creates_warning(
+    lifecycle_connection: Connection,
+) -> None:
+    insert_express_product(
+        lifecycle_connection,
+        "TESTEXPRESS006",
+        next_observation_date=AS_OF_DATE,
+        autocall_level=Decimal("100"),
+    )
+
+    events = find_express_autocall_events(
+        lifecycle_connection,
+        AS_OF_DATE,
+    )
+
+    assert events == [
+        Event(
+            isin="TESTEXPRESS006",
+            event_type=MISSING_OBSERVATION_PRICE,
+            severity="WARNING",
+            event_date=AS_OF_DATE,
+            description=(
+                "Express product TESTEXPRESS006 has no market price on "
+                "observation date 2026-08-23."
+            ),
+            details={
+                "underlying": "TEST.EXPRESS",
+                "observation_date": "2026-08-23",
+                "autocall_level": 100.0,
+            },
+        )
+    ]
+
+
+def test_express_without_autocall_level_is_skipped_safely(
+    lifecycle_connection: Connection,
+) -> None:
+    insert_express_product(
+        lifecycle_connection,
+        "TESTEXPRESS007",
+        next_observation_date=AS_OF_DATE,
+        autocall_level=None,
+    )
+    insert_prices(
+        lifecycle_connection,
+        [(AS_OF_DATE, Decimal("105"))],
+        underlying="TEST.EXPRESS",
+    )
+
+    assert find_express_autocall_events(
         lifecycle_connection,
         AS_OF_DATE,
     ) == []

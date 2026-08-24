@@ -2,7 +2,7 @@
 
 A prototype monitoring system for structured-product lifecycle and exchange-listing processes.
 
-> **Project status:** Phase 8 is complete. Historical Bonus barrier monitoring, general lifecycle monitoring, product validation, and all three exchange-reconciliation rules are implemented and persist idempotent events. Express lifecycle rules and the dashboard are intentionally not implemented yet.
+> **Project status:** Phase 9 is complete. Exact-date Express autocall monitoring, missing observation-price detection, historical Bonus barrier monitoring, general lifecycle monitoring, product validation, and all three exchange-reconciliation rules are implemented. The dashboard is intentionally not implemented yet.
 
 ## Business context
 
@@ -53,11 +53,8 @@ Each layer will have one responsibility. CSV parsing, SQL/database access, busin
 - `EXPIRED_BUT_ACTIVE`: maturity has passed while internal status remains active
 - `MATURITY_WITHIN_7_DAYS`: active product matures within seven calendar days
 - `BARRIER_BREACHED`: Bonus barrier was reached or crossed during the valid historical monitoring period
-
-## Planned checks
-
-- Express autocall trigger
-- Missing Express observation-day price
+- `AUTOCALL_TRIGGERED`: Express observation-date price reached or exceeded the autocall level
+- `MISSING_OBSERVATION_PRICE`: due Express product has no price on its exact observation date
 
 ## Technology
 
