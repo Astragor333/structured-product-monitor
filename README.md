@@ -2,7 +2,7 @@
 
 A prototype monitoring system for structured-product lifecycle and exchange-listing processes.
 
-> **Project status:** Phase 10 is complete. Event persistence is protected against duplicate logical events, and all validation, reconciliation, and lifecycle rules through Express autocall monitoring are implemented. The dashboard is intentionally not implemented yet.
+> **Project status:** Phase 11 is complete. A read-only Streamlit dashboard presents product, reconciliation, lifecycle, and data-quality information from PostgreSQL. Event persistence remains idempotent, and all backend rules through Express autocall monitoring remain implemented.
 
 ## Business context
 
@@ -78,7 +78,7 @@ structured-product-monitor/
 |-- sql/                   # PostgreSQL schema and query files (Phase 2 onward)
 |-- src/                   # Configuration, database, ingestion, and future engines
 |-- tests/                 # Automated business-rule and persistence tests
-|-- app.py                 # Future Streamlit entry point
+|-- app.py                 # Read-only Streamlit dashboard entry point
 |-- load_demo_data.py      # Transactional CSV loader
 |-- requirements.txt       # Python dependencies
 |-- .env.example           # Safe database configuration template
@@ -153,3 +153,13 @@ Run all implemented business-rule tests:
 ```powershell
 python -m pytest tests -v
 ```
+
+Start the read-only dashboard:
+
+```powershell
+streamlit run app.py
+```
+
+The dashboard displays the configured demo as-of date and reads products and
+already-generated events from PostgreSQL. It does not run monitoring rules or
+modify database records.

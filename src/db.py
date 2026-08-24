@@ -43,3 +43,18 @@ def database_connection(
         raise
     finally:
         connection.close()
+
+
+@contextmanager
+def read_only_database_connection(
+    config: DatabaseConfig | None = None,
+) -> Iterator[Connection]:
+    """Provide a database-enforced read-only connection for reporting views."""
+
+    connection = create_connection(config)
+    try:
+        connection.read_only = True
+        yield connection
+    finally:
+        connection.rollback()
+        connection.close()
