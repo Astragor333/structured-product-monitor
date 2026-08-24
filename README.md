@@ -2,7 +2,7 @@
 
 A prototype monitoring system for structured-product lifecycle and exchange-listing processes.
 
-> **Project status:** Phase 9 is complete. Exact-date Express autocall monitoring, missing observation-price detection, historical Bonus barrier monitoring, general lifecycle monitoring, product validation, and all three exchange-reconciliation rules are implemented. The dashboard is intentionally not implemented yet.
+> **Project status:** Phase 10 is complete. Event persistence is protected against duplicate logical events, and all validation, reconciliation, and lifecycle rules through Express autocall monitoring are implemented. The dashboard is intentionally not implemented yet.
 
 ## Business context
 
@@ -56,6 +56,10 @@ Each layer will have one responsibility. CSV parsing, SQL/database access, busin
 - `AUTOCALL_TRIGGERED`: Express observation-date price reached or exceeded the autocall level
 - `MISSING_OBSERVATION_PRICE`: due Express product has no price on its exact observation date
 
+## Idempotent event persistence
+
+Logical event identity is defined by `isin + event_type + event_date`. PostgreSQL enforces that identity with the `uq_events_identity` unique index, using `COALESCE(isin, '')` so nullable ISIN values are handled consistently. The event service inserts with `ON CONFLICT DO NOTHING`, so repeating an identical monitoring run does not create duplicate alerts while different dates or event types remain distinct.
+
 ## Technology
 
 - Python 3.12+
@@ -73,7 +77,7 @@ structured-product-monitor/
 |-- data/                  # Fixed, read-only demo CSV datasets
 |-- sql/                   # PostgreSQL schema and query files (Phase 2 onward)
 |-- src/                   # Configuration, database, ingestion, and future engines
-|-- tests/                 # Automated-test placeholders for later rule phases
+|-- tests/                 # Automated business-rule and persistence tests
 |-- app.py                 # Future Streamlit entry point
 |-- load_demo_data.py      # Transactional CSV loader
 |-- requirements.txt       # Python dependencies
