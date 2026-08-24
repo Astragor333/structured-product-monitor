@@ -29,7 +29,7 @@ def run_monitoring(as_of_date: date) -> list[Event]:
         LOGGER.info("Running reconciliation")
         reconciliation_events = run_reconciliation(connection, as_of_date)
 
-        LOGGER.info("Running general lifecycle monitoring")
+        LOGGER.info("Running lifecycle monitoring")
         lifecycle_events = run_lifecycle(connection, as_of_date)
 
         all_events = (

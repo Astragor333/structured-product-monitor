@@ -2,7 +2,7 @@
 
 A prototype monitoring system for structured-product lifecycle and exchange-listing processes.
 
-> **Project status:** Phase 7 is complete. General lifecycle monitoring, product validation, and all three exchange-reconciliation rules are implemented and persist idempotent events. Product-specific lifecycle rules and the dashboard are intentionally not implemented yet.
+> **Project status:** Phase 8 is complete. Historical Bonus barrier monitoring, general lifecycle monitoring, product validation, and all three exchange-reconciliation rules are implemented and persist idempotent events. Express lifecycle rules and the dashboard are intentionally not implemented yet.
 
 ## Business context
 
@@ -52,10 +52,10 @@ Each layer will have one responsibility. CSV parsing, SQL/database access, busin
 - `INVALID_DATE_RANGE`: issue date is after maturity date
 - `EXPIRED_BUT_ACTIVE`: maturity has passed while internal status remains active
 - `MATURITY_WITHIN_7_DAYS`: active product matures within seven calendar days
+- `BARRIER_BREACHED`: Bonus barrier was reached or crossed during the valid historical monitoring period
 
 ## Planned checks
 
-- Historical Bonus barrier breach
 - Express autocall trigger
 - Missing Express observation-day price
 
@@ -141,7 +141,7 @@ python load_demo_data.py --fresh
 
 The fresh option also clears persisted events and resets their identity sequence. Later phases will add and verify commands for monitoring, tests, and the Streamlit dashboard.
 
-Run validation, reconciliation, and general lifecycle monitoring for the deterministic demo date:
+Run validation, reconciliation, and implemented lifecycle monitoring for the deterministic demo date:
 
 ```powershell
 python -m src.monitor --as-of-date 2026-08-23
